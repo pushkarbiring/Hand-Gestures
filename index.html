@@ -180,74 +180,75 @@
         }
 
         // Initialize Base Geometry (Starting with Sphere)
+       // --- INITIALIZE BASE GEOMETRY ---
         const initialPositions = generateShape(shapeConfigs[0]);
         baseGeometry.setAttribute('position', new THREE.BufferAttribute(initialPositions, 3));
         
-        // Initialize Base Colors
         const baseColors = new Float32Array(particleCount * 3);
         const col = new THREE.Color(shapeConfigs[0].color);
         for(let i=0; i<baseColors.length; i+=3) { baseColors[i]=col.r; baseColors[i+1]=col.g; baseColors[i+2]=col.b; }
         baseGeometry.setAttribute('color', new THREE.BufferAttribute(baseColors, 3));
+
+        // FIX: Pre-allocate the target attributes immediately so WebGL doesn't crash!
+        baseGeometry.setAttribute('position1', new THREE.BufferAttribute(new Float32Array(initialPositions), 3));
+        baseGeometry.setAttribute('color1', new THREE.BufferAttribute(new Float32Array(baseColors), 3));
 
         // Create Custom Shader Material
         const material = new THREE.ShaderMaterial({
             vertexShader: document.getElementById('vertexShader').textContent,
             fragmentShader: document.getElementById('fragmentShader').textContent,
             transparent: true,
-            blending: THREE.AdditiveBlending, // Vital for glow
-            depthWrite: false, // Vital for transparent particle layering
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
             uniforms: {
                 uTime: { value: 0.0 },
                 uMorphProgress: { value: 1.0 },
                 uScale: { value: 1.0 },
-                uGlobalColor: { value: new THREE.Color(0xffffff) } // Color modified by hand
+                uGlobalColor: { value: new THREE.Color(0xffffff) } 
             }
         });
 
         const particles = new THREE.Points(baseGeometry, material);
         scene.add(particles);
 
-        // Function to set up the next target for GPU morphing
+        // --- SAFE MORPH FUNCTION ---
         function triggerMorph() {
             if (isMorphing) return; // Prevent double trigger
             
-            // Only update if position1 exists (skips on the very first run)
-            if (baseGeometry.attributes.position1) {
-                const posAttr = baseGeometry.attributes.position;
-                const targetPosArr = baseGeometry.attributes.position1.array;
-                posAttr.array.set(targetPosArr);
-                posAttr.needsUpdate = true;
+            const posAttr = baseGeometry.attributes.position;
+            const targetPosAttr = baseGeometry.attributes.position1;
+            const colAttr = baseGeometry.attributes.color;
+            const targetColAttr = baseGeometry.attributes.color1;
 
-                const colAttr = baseGeometry.attributes.color;
-                const targetColArr = baseGeometry.attributes.color1.array;
-                colAttr.array.set(targetColArr);
-                colAttr.needsUpdate = true;
-            }
+            // 1. Shift current target shape to become the new base shape
+            posAttr.array.set(targetPosAttr.array);
+            posAttr.needsUpdate = true;
+            colAttr.array.set(targetColAttr.array);
+            colAttr.needsUpdate = true;
             
-            // ... (rest of the function stays the same)
-            
-            // Advance shape index
+            // 2. Advance to the next shape configuration
             currentShapeIndex = (currentShapeIndex + 1) % shapeConfigs.length;
             const nextConfig = shapeConfigs[currentShapeIndex];
 
-            // 1. Pass new target POSITIONS to GPU as attribute 'position1'
-            const newTargetPositions = generateShape(nextConfig);
-            baseGeometry.setAttribute('position1', new THREE.BufferAttribute(newTargetPositions, 3));
-            
-            // 2. Pass new target COLORS to GPU as attribute 'color1'
-            const newTargetColors = new Float32Array(particleCount * 3);
-            const targetCol = new THREE.Color(nextConfig.color);
-            for(let i=0; i<newTargetColors.length; i+=3) { newTargetColors[i]=targetCol.r; newTargetColors[i+1]=targetCol.g; newTargetColors[i+2]=targetCol.b; }
-            baseGeometry.setAttribute('color1', new THREE.BufferAttribute(newTargetColors, 3));
+            // 3. Update the target arrays with the newly generated shape data
+            targetPosAttr.array.set(generateShape(nextConfig));
+            targetPosAttr.needsUpdate = true;
 
-            // Start morph
+            const targetCol = new THREE.Color(nextConfig.color);
+            for(let i=0; i<targetColAttr.array.length; i+=3) { 
+                targetColAttr.array[i] = targetCol.r; 
+                targetColAttr.array[i+1] = targetCol.g; 
+                targetColAttr.array[i+2] = targetCol.b; 
+            }
+            targetColAttr.needsUpdate = true;
+
+            // Start animation
             isMorphing = true;
             morphStartTime = performance.now();
             material.uniforms.uMorphProgress.value = 0.0;
         }
         
-        // Initial setup for 'position1' so shader doesn't crash on first frame
-        triggerMorph(); 
+        // Note: No need to call triggerMorph() on startup anymore! 
 
 
         // --- 4. HAND TRACKING LOGIC ---
