@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>GPU Gesture Particles</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: sans-serif; }
+        canvas { display: block; }
+        #videoElement { display: none; }
+        #ui { position: absolute; top: 10px; left: 10px; color: rgba(255,255,255,0.8); pointer-events: none; text-shadow: 1px 1px 2px black; z-index: 10; max-width: 300px; }
+        #status { font-weight: bold; color: #00d2ff; }
+        @media (max-width: 600px) { #ui h2 { font-size: 1.2rem; } #ui p { font-size: 0.8rem; } }
+    </style>
+    <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+    <div id="ui">
+        <h2>✨ GPU Gesture Particles</h2>
+        <p id="status">Waiting for camera... (Use HTTPS)</p>
+        <p>🖐️ <b>Open Hand:</b> Expand</p>
+        <p>✊ <b>Closed Fist:</b> Contract & Color Shift</p>
+        <p>🤏 <b>Pinch:</b> Switch Shape</p>
+    </div>
+    
+    <video id="videoElement" autoplay playsinline></video>
+
+    <script id="vertexShader" type="x-shader/x-vertex">
+        uniform float uTime;
+        uniform float uMorphProgress; // 0 to 1 transition
+        uniform float uScale;
+        
+        // Target shape positions passed as attributes (very fast)
+        attribute vec3 position1; // Target shape (Sphere, Heart, etc.)
+        attribute vec3 color1;    // Color of that specific point
+        
+        varying vec3 vColor;
+        varying float vAlpha;
+
+        void main() {
+            // Base vertex color from geometry
+            vColor = color;
+            
+            // --- 1. GPU MORPHING ---
+            // Interpolate position between current and target shape purely on GPU
+            vec3 morphedPos = mix(position, position1, uMorphProgress);
+
+            // --- 2. GPU PHYSICS: Drifting Noise ---
+            // Add gentle Perlin-style noise based on time and location
+            morphedPos.x += sin(morphedPos.y * 0.1 + uTime * 0.5) * 0.6;
+            morphedPos.y += cos(morphedPos.z * 0.1 + uTime * 0.5) * 0.6;
+            morphedPos.z += sin(morphedPos.x * 0.1 + uTime * 0.5) * 0.6;
+
+            // --- 3. APPLY HAND GESTURE SCALE ---
+            morphedPos *= uScale;
+
+            vec4 mvPosition = modelViewMatrix * vec4(morphedPos, 1.0);
+            
+            // Size attenuation based on depth (closer points are bigger)
+            gl_PointSize = 12.0 * (40.0 / -mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    </script>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        varying vec3 vColor;
+        uniform vec3 uGlobalColor;
+
+        void main() {
+            // --- 4. GLOWING CIRCULAR PARTICLES ---
+            // Create a soft circle, discard square edges
+            float dist = distance(gl_PointCoord, vec2(0.5));
+            if (dist > 0.5) discard;
+            
+            // Gradient fading to the edge
+            float alpha = smoothstep(0.5, 0.1, dist) * 0.9;
+            
+            // Mix particle inherent color (vColor) with hand-controlled color (uGlobalColor)
+            gl_FragColor = vec4(mix(vColor, uGlobalColor, 0.5), alpha);
+        }
+    </script>
+
+    <script>
+        // --- 1. SETUP THREE.JS ENGINE ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 45;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
+        renderer.toneMapping = THREE.ReinhardToneMapping; // Required for good bloom
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. POST-PROCESSING (NEON GLOW) ---
+        const renderScene = new THREE.RenderPass(scene, camera);
+        // Res, Strength, Radius, Threshold
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.8, 0.3, 0.2);
+        
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(renderScene);
+        composer.addPass(bloomPass);
+
+        // --- 3. GENERATE PARTICLE SYSTEM & SHAPES ---
+        const particleCount = 10000; // Keep high, GPU handles it now
+        const baseGeometry = new THREE.BufferGeometry();
+        
+        // Define shape indices
+        const shapes = { SPHERE: 0, HEART: 1, FLOWER: 2, SATURN: 3 };
+        const shapeConfigs = [
+            { type: shapes.SPHERE, r: 18, color: 0x00d2ff }, // Cyan
+            { type: shapes.HEART,  r: 18, color: 0xff0066 }, // Neon Pink
+            { type: shapes.FLOWER, r: 18, color: 0xccff00 }, // Acid Green
+            { type: shapes.SATURN, r: 18, color: 0xffaa00 }  // Solar Gold
+        ];
+
+        let currentShapeIndex = 0;
+        let isMorphing = false;
+        let morphStartTime = 0;
+        const morphDuration = 1000; // ms
+
+        // Helper function to generate shape position data
+        function generateShape(shapeConfig) {
+            const data = new Float32Array(particleCount * 3);
+            const r = shapeConfig.r;
+            for (let i = 0; i < particleCount; i++) {
+                let x, y, z;
+                const idx = i * 3;
+                
+                if (shapeConfig.type === shapes.SPHERE) {
+                    const phi = Math.acos(-1 + (2 * i) / particleCount);
+                    const theta = Math.sqrt(particleCount * Math.PI) * phi;
+                    x = r * Math.cos(theta) * Math.sin(phi);
+                    y = r * Math.sin(theta) * Math.sin(phi);
+                    z = r * Math.cos(phi);
+                } 
+                else if (shapeConfig.type === shapes.HEART) {
+                    const t = Math.PI * 2 * (i / particleCount);
+                    x = r * Math.pow(Math.sin(t), 3);
+                    y = (15/18*r) * Math.cos(t) - (5/18*r) * Math.cos(2 * t) - (2/18*r) * Math.cos(3 * t) - (1/18*r) * Math.cos(4 * t);
+                    z = (Math.random() - 0.5) * 5; 
+                } 
+                else if (shapeConfig.type === shapes.FLOWER) {
+                    const petals = 6;
+                    const theta = (i / particleCount) * Math.PI * 2 * petals; 
+                    const petalR = r * Math.cos(petals * theta) + Math.random() * 2; 
+                    x = petalR * Math.cos(theta);
+                    y = petalR * Math.sin(theta);
+                    z = (Math.random() - 0.5) * 4;
+                }
+                else if (shapeConfig.type === shapes.SATURN) {
+                    if (i < particleCount * 0.3) {
+                        const phi = Math.acos(-1 + (2 * (i / 0.3)) / particleCount);
+                        const theta = Math.sqrt(particleCount * Math.PI) * phi;
+                        const planetR = 10;
+                        x = planetR * Math.cos(theta) * Math.sin(phi);
+                        y = planetR * Math.sin(theta) * Math.sin(phi);
+                        z = planetR * Math.cos(phi);
+                    } else {
+                        const t = Math.PI * 2 * (i / (particleCount * 0.7));
+                        const ringR = 15 + Math.random() * 12;
+                        x = ringR * Math.cos(t);
+                        y = (Math.random() - 0.5) * 1.5;
+                        z = ringR * Math.sin(t);
+                    }
+                }
+                data[idx] = x; data[idx + 1] = y; data[idx + 2] = z;
+            }
+            return data;
+        }
+
+        // Initialize Base Geometry (Starting with Sphere)
+        const initialPositions = generateShape(shapeConfigs[0]);
+        baseGeometry.setAttribute('position', new THREE.BufferAttribute(initialPositions, 3));
+        
+        // Initialize Base Colors
+        const baseColors = new Float32Array(particleCount * 3);
+        const col = new THREE.Color(shapeConfigs[0].color);
+        for(let i=0; i<baseColors.length; i+=3) { baseColors[i]=col.r; baseColors[i+1]=col.g; baseColors[i+2]=col.b; }
+        baseGeometry.setAttribute('color', new THREE.BufferAttribute(baseColors, 3));
+
+        // Create Custom Shader Material
+        const material = new THREE.ShaderMaterial({
+            vertexShader: document.getElementById('vertexShader').textContent,
+            fragmentShader: document.getElementById('fragmentShader').textContent,
+            transparent: true,
+            blending: THREE.AdditiveBlending, // Vital for glow
+            depthWrite: false, // Vital for transparent particle layering
+            uniforms: {
+                uTime: { value: 0.0 },
+                uMorphProgress: { value: 1.0 },
+                uScale: { value: 1.0 },
+                uGlobalColor: { value: new THREE.Color(0xffffff) } // Color modified by hand
+            }
+        });
+
+        const particles = new THREE.Points(baseGeometry, material);
+        scene.add(particles);
+
+        // Function to set up the next target for GPU morphing
+        function triggerMorph() {
+            if (isMorphing) return; // Prevent double trigger
+            
+            // Update Base Geometry to current target before starting new morph
+            const posAttr = baseGeometry.attributes.position;
+            const targetPosArr = baseGeometry.attributes.position1.array;
+            posAttr.array.set(targetPosArr);
+            posAttr.needsUpdate = true;
+
+            const colAttr = baseGeometry.attributes.color;
+            const targetColArr = baseGeometry.attributes.color1.array;
+            colAttr.array.set(targetColArr);
+            colAttr.needsUpdate = true;
+            
+            // Advance shape index
+            currentShapeIndex = (currentShapeIndex + 1) % shapeConfigs.length;
+            const nextConfig = shapeConfigs[currentShapeIndex];
+
+            // 1. Pass new target POSITIONS to GPU as attribute 'position1'
+            const newTargetPositions = generateShape(nextConfig);
+            baseGeometry.setAttribute('position1', new THREE.BufferAttribute(newTargetPositions, 3));
+            
+            // 2. Pass new target COLORS to GPU as attribute 'color1'
+            const newTargetColors = new Float32Array(particleCount * 3);
+            const targetCol = new THREE.Color(nextConfig.color);
+            for(let i=0; i<newTargetColors.length; i+=3) { newTargetColors[i]=targetCol.r; newTargetColors[i+1]=targetCol.g; newTargetColors[i+2]=targetCol.b; }
+            baseGeometry.setAttribute('color1', new THREE.BufferAttribute(newTargetColors, 3));
+
+            // Start morph
+            isMorphing = true;
+            morphStartTime = performance.now();
+            material.uniforms.uMorphProgress.value = 0.0;
+        }
+        
+        // Initial setup for 'position1' so shader doesn't crash on first frame
+        triggerMorph(); 
+
+
+        // --- 4. HAND TRACKING LOGIC ---
+        const videoElement = document.getElementById('videoElement');
+        let targetScale = 1;
+        let pinchCooldown = 0;
+        let handColorCurrent = new THREE.Color(0xffffff);
+        let handColorTarget = new THREE.Color(0xffffff);
+
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        
+        hands.setOptions({ 
+            maxNumHands: 1, 
+            modelComplexity: 1, 
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7 
+        });
+
+        hands.onResults((results) => {
+            const statusEl = document.getElementById('status');
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                statusEl.innerText = "Tracking Active"; statusEl.style.color = "#ccff00";
+                
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // --- Gesture Math ---
+                // Pinch: Thumb Tip (4) to Index Tip (8)
+                const thumb = landmarks[4], index = landmarks[8];
+                const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+
+                // Openness: Wrist (0) to Middle Tip (12)
+                const wrist = landmarks[0], middle = landmarks[12];
+                const openDist = Math.hypot(wrist.x - middle.x, wrist.y - middle.y);
+
+                // --- Trigger Actions ---
+                // 1. Pinch to Cycle Shape
+                if (pinchDist < 0.06 && pinchCooldown <= 0) {
+                    triggerMorph();
+                    pinchCooldown = 40; // prevents rapid rapid switching
+                }
+
+                // 2. Open/Close to Scale & Color
+                if (openDist > 0.4) {
+                    targetScale = 1.6; // Expand
+                } else if (openDist < 0.22) {
+                    targetScale = 0.5; // Contract
+                    // Shift to a random neon color palette on fist close
+                    const neonPalettes = [0xff00ff, 0x00ffff, 0xffff00, 0xff3300];
+                    handColorTarget.set(neonPalettes[Math.floor(Math.random()*neonPalettes.length)]);
+                } else {
+                    targetScale = 1.0; 
+                }
+            } else {
+                statusEl.innerText = "Hand Lost"; statusEl.style.color = "rgba(255,255,255,0.5)";
+                targetScale = 1.0; // Return to normal
+                handColorTarget.set(0xffffff); // Return to standard color
+            }
+            if (pinchCooldown > 0) pinchCooldown--;
+        });
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480,
+            facingMode: 'user' // IMPORTANT: Forces front camera for mobile usage
+        });
+        cameraUtils.start().catch(()=>{
+            document.getElementById('status').innerText = "Camera Denied. Must use HTTPS/Localhost.";
+            document.getElementById('status').style.color = "red";
+        });
+
+        // --- 5. ANIMATION LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const elapsedTime = clock.getElapsedTime();
+
+            // Update Shader Uniforms
+            material.uniforms.uTime.value = elapsedTime;
+            
+            // Smoothly interpolate hand gesture scale uniform
+            material.uniforms.uScale.value = THREE.MathUtils.lerp(material.uniforms.uScale.value, targetScale, 0.1);
+            
+            // Smoothly interpolate hand gesture color uniform
+            handColorCurrent.lerp(handColorTarget, 0.05);
+            material.uniforms.uGlobalColor.value = handColorCurrent;
+
+            // Handle GPU Morphing animation progress
+            if (isMorphing) {
+                const morphTimeElapsed = performance.now() - morphStartTime;
+                let progress = morphTimeElapsed / morphDuration;
+                
+                // Use Easing (Optional, for smoother transition)
+                progress = Math.min(1.0, progress); // cap at 1
+                progress = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress; // quad in-out
+
+                material.uniforms.uMorphProgress.value = progress;
+
+                if (progress >= 1.0) isMorphing = false;
+            }
+
+            // Slowly rotate entire system
+            particles.rotation.y = elapsedTime * 0.05;
+            particles.rotation.x = elapsedTime * 0.02;
+
+            // Render via composer for Bloom pass
+            composer.render();
+        }
+
+        animate();
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
