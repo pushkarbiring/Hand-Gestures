@@ -1,5 +1,7 @@
 # ✨ GPU Gesture Particles 🖐️
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Play%20Now!-00d2ff?style=for-the-badge&logo=googlechrome&logoColor=white)](https://pushkarbiring.github.io/Hand-Gestures/)
+
 A high-performance, interactive 3D particle system running directly in your browser, controlled by real-time hand gestures. 
 
 This project demonstrates how to combine advanced WebGL rendering (Three.js with custom GLSL shaders) with lightweight Machine Learning (Google MediaPipe Hands) to create a futuristic, sci-fi aesthetic inspired by Marvel's *Iron Man* or *Doctor Strange*.
@@ -10,10 +12,10 @@ This project demonstrates how to combine advanced WebGL rendering (Three.js with
 * **Gestural Controls:**
     * 🖐️ **Open Hand:** Expands the entire particle swarm (Scales up).
     * ✊ **Closed Fist:** Contracts the swarm (Scales down) and triggers a shifting neon color palette.
-    * 🤏 **Pinch (Thumb + Index):** Cycles between 4 mathematical templates.
-* **4 Distinct Templates:** Morph between a **Sphere**, **Heart**, **Flower**, and **Saturn** shape.
+    * 🤏 **Pinch (Thumb + Index):** Cycles between mathematical templates.
+* **7 Distinct Templates:** Morph between a **Sphere**, **Heart**, **Flower**, **Saturn**, **Torus**, **Spiral**, and **Galaxy** shape.
 * **Neon Glow Aesthetic:** Utilizes Three.js `EffectComposer` and `UnrealBloomPass` for stunning glowing post-processing effects.
-* **Highly Optimized (Mobile Ready):** * Draws **10,000 particles** at 60fps on modern smartphones.
+* **Highly Optimized (Mobile Ready):** Draws **12,000 particles** at 60fps on modern smartphones.
     * **Crucial Performance Note:** Unlike basic JavaScript implementation, this version offloads the heavy particle morphing interpolation (`mix`) and gentle drifting physics entirely to a custom **GLSL Vertex Shader** running on the GPU.
 
 ## 🛠️ Tech Stack
