@@ -5,12 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>GPU Gesture Particles</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #050505; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #030303; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         canvas { display: block; }
         #videoElement { display: none; }
-        #ui { position: absolute; top: 10px; left: 10px; color: rgba(255,255,255,0.8); pointer-events: none; text-shadow: 1px 1px 2px black; z-index: 10; max-width: 300px; }
-        #status { font-weight: bold; color: #00d2ff; }
-        @media (max-width: 600px) { #ui h2 { font-size: 1.2rem; } #ui p { font-size: 0.8rem; } }
+        #ui { position: absolute; top: 15px; left: 15px; color: rgba(255,255,255,0.85); pointer-events: none; text-shadow: 1px 1px 4px rgba(0,0,0,0.8); z-index: 10; max-width: 350px; }
+        h2 { margin: 0 0 5px 0; font-weight: 600; font-size: 1.4rem; letter-spacing: 0.5px; }
+        #status { font-weight: bold; color: #00d2ff; margin-bottom: 15px; font-size: 0.9rem; }
+        p { margin: 6px 0; font-size: 0.9rem; }
+        @media (max-width: 600px) { #ui h2 { font-size: 1.2rem; } p, #status { font-size: 0.8rem; } }
     </style>
     <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
@@ -24,11 +26,11 @@
 </head>
 <body>
     <div id="ui">
-        <h2>✨ GPU Gesture Particles</h2>
-        <p id="status">Waiting for camera... (Use HTTPS)</p>
-        <p>🖐️ <b>Open Hand:</b> Expand</p>
-        <p>✊ <b>Closed Fist:</b> Contract & Color Shift</p>
-        <p>🤏 <b>Pinch:</b> Switch Shape</p>
+        <h2>✨ Neural Particles</h2>
+        <p id="status">Initializing Engine...</p>
+        <p>🖐️ <b>Open Hand:</b> Expand Swarm</p>
+        <p>✊ <b>Closed Fist:</b> Shrink & Color Shift</p>
+        <p>🤏 <b>Pinch:</b> Morph Shape (7 Available)</p>
     </div>
     
     <video id="videoElement" autoplay playsinline></video>
@@ -38,31 +40,34 @@
         uniform float uMorphProgress; 
         uniform float uScale;
         
-        // Target shape positions passed as attributes
         attribute vec3 position1; 
         attribute vec3 color1;    
         
         varying vec3 vColor;
 
+        // Pseudo-random function for organic noise
+        float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+
         void main() {
-            // --- 1. GPU COLOR MORPHING ---
+            // Smoothly transition between shape colors
             vColor = mix(color, color1, uMorphProgress);
             
-            // --- 2. GPU POSITION MORPHING ---
+            // Interpolate position between current and target shape
             vec3 morphedPos = mix(position, position1, uMorphProgress);
 
-            // --- 3. GPU PHYSICS: Drifting Noise ---
-            morphedPos.x += sin(morphedPos.y * 0.1 + uTime * 0.5) * 0.5;
-            morphedPos.y += cos(morphedPos.z * 0.1 + uTime * 0.5) * 0.5;
-            morphedPos.z += sin(morphedPos.x * 0.1 + uTime * 0.5) * 0.5;
+            // ORGANIC PHYSICS: Use the particle's inherent position as a noise seed so they drift uniquely
+            float noiseOffset = random(position.xy) * 6.28;
+            morphedPos.x += sin(position.y * 0.2 + uTime * 0.8 + noiseOffset) * 0.4;
+            morphedPos.y += cos(position.z * 0.2 + uTime * 0.8 + noiseOffset) * 0.4;
+            morphedPos.z += sin(position.x * 0.2 + uTime * 0.8 + noiseOffset) * 0.4;
 
-            // --- 4. APPLY HAND GESTURE SCALE ---
+            // Apply gesture scale
             morphedPos *= uScale;
 
             vec4 mvPosition = modelViewMatrix * vec4(morphedPos, 1.0);
             
-            // FIX: Reduced particle size for crisp, professional look
-            gl_PointSize = 4.5 * (40.0 / -mvPosition.z);
+            // CRISP PARTICLES: Reduced size multiplier for realistic "dust/spark" look
+            gl_PointSize = 2.8 * (40.0 / -mvPosition.z);
             gl_Position = projectionMatrix * mvPosition;
         }
     </script>
@@ -72,58 +77,63 @@
         uniform vec3 uGlobalColor;
 
         void main() {
-            // --- GLOWING CIRCULAR PARTICLES ---
+            // Create a perfect soft circle
             float dist = distance(gl_PointCoord, vec2(0.5));
             if (dist > 0.5) discard;
             
             float alpha = smoothstep(0.5, 0.1, dist);
             
-            // FIX: Multiply colors instead of mix, and reduce base alpha to prevent pure white-out
-            gl_FragColor = vec4(vColor * uGlobalColor, alpha * 0.5);
+            // FINE OPACITY: Heavily reduced base alpha (0.25) so additive blending creates rich colors, not white blobs
+            gl_FragColor = vec4(vColor * uGlobalColor, alpha * 0.25);
         }
     </script>
 
     <script>
         // --- 1. SETUP THREE.JS ENGINE ---
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x050505, 0.015);
+        scene.fog = new THREE.FogExp2(0x030303, 0.012); // Slightly deeper dark background
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.z = 45;
+        camera.position.z = 50; // Pulled back slightly for larger shapes
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-        // FIX: ACESFilmic makes neon lights look much more realistic and less blown-out
+        
+        // ACESFilmic handles bright glowing overlap like a real camera sensor
         renderer.toneMapping = THREE.ACESFilmicToneMapping; 
-        renderer.toneMappingExposure = 1.2;
+        renderer.toneMappingExposure = 1.0;
         document.body.appendChild(renderer.domElement);
 
-        // --- 2. POST-PROCESSING (NEON GLOW) ---
+        // --- 2. POST-PROCESSING (PROFESSIONAL BLOOM) ---
         const renderScene = new THREE.RenderPass(scene, camera);
-        // FIX: Lowered bloom strength and adjusted radius/threshold for a subtle, pro glow
-        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.5, 0.15);
+        // Strength: 1.5, Radius: 0.4, Threshold: 0.1 (Tighter, cleaner glow)
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.1);
         
         const composer = new THREE.EffectComposer(renderer);
         composer.addPass(renderScene);
         composer.addPass(bloomPass);
 
-        // --- 3. GENERATE PARTICLE SYSTEM & SHAPES ---
-        const particleCount = 10000; 
+        // --- 3. ADVANCED SHAPE GENERATION ---
+        const particleCount = 12000; // Increased for richer shapes
         const baseGeometry = new THREE.BufferGeometry();
         
-        const shapes = { SPHERE: 0, HEART: 1, FLOWER: 2, SATURN: 3 };
+        // 7 Distinct Shapes
+        const shapes = { SPHERE: 0, HEART: 1, FLOWER: 2, SATURN: 3, TORUS: 4, SPIRAL: 5, GALAXY: 6 };
         const shapeConfigs = [
             { type: shapes.SPHERE, r: 18, color: 0x00d2ff }, // Cyan
+            { type: shapes.GALAXY, r: 22, color: 0xff5500 }, // Fire Orange
+            { type: shapes.TORUS,  r: 15, color: 0xaa00ff }, // Deep Purple
             { type: shapes.HEART,  r: 18, color: 0xff0066 }, // Neon Pink
-            { type: shapes.FLOWER, r: 18, color: 0xccff00 }, // Acid Green
+            { type: shapes.SPIRAL, r: 12, color: 0x00ffaa }, // Mint Green
+            { type: shapes.FLOWER, r: 18, color: 0xccff00 }, // Acid Yellow
             { type: shapes.SATURN, r: 18, color: 0xffaa00 }  // Solar Gold
         ];
 
         let currentShapeIndex = 0;
         let isMorphing = false;
         let morphStartTime = 0;
-        const morphDuration = 1000; 
+        const morphDuration = 2500; // SLOWER, MAJESTIC MORPH (2.5 seconds)
 
         function generateShape(shapeConfig) {
             const data = new Float32Array(particleCount * 3);
@@ -143,10 +153,10 @@
                     const t = Math.PI * 2 * (i / particleCount);
                     x = r * Math.pow(Math.sin(t), 3);
                     y = (15/18*r) * Math.cos(t) - (5/18*r) * Math.cos(2 * t) - (2/18*r) * Math.cos(3 * t) - (1/18*r) * Math.cos(4 * t);
-                    z = (Math.random() - 0.5) * 5; 
+                    z = (Math.random() - 0.5) * 4; 
                 } 
                 else if (shapeConfig.type === shapes.FLOWER) {
-                    const petals = 6;
+                    const petals = 5;
                     const theta = (i / particleCount) * Math.PI * 2 * petals; 
                     const petalR = r * Math.cos(petals * theta) + Math.random() * 2; 
                     x = petalR * Math.cos(theta);
@@ -154,26 +164,52 @@
                     z = (Math.random() - 0.5) * 4;
                 }
                 else if (shapeConfig.type === shapes.SATURN) {
-                    if (i < particleCount * 0.3) {
-                        const phi = Math.acos(-1 + (2 * (i / 0.3)) / particleCount);
+                    if (i < particleCount * 0.25) {
+                        const phi = Math.acos(-1 + (2 * (i / 0.25)) / particleCount);
                         const theta = Math.sqrt(particleCount * Math.PI) * phi;
-                        const planetR = 10;
-                        x = planetR * Math.cos(theta) * Math.sin(phi);
-                        y = planetR * Math.sin(theta) * Math.sin(phi);
-                        z = planetR * Math.cos(phi);
+                        x = 9 * Math.cos(theta) * Math.sin(phi);
+                        y = 9 * Math.sin(theta) * Math.sin(phi);
+                        z = 9 * Math.cos(phi);
                     } else {
-                        const t = Math.PI * 2 * (i / (particleCount * 0.7));
-                        const ringR = 15 + Math.random() * 12;
+                        const t = Math.PI * 2 * (i / (particleCount * 0.75));
+                        const ringR = 14 + Math.random() * 10;
                         x = ringR * Math.cos(t);
                         y = (Math.random() - 0.5) * 1.5;
                         z = ringR * Math.sin(t);
                     }
                 }
+                else if (shapeConfig.type === shapes.TORUS) {
+                    const u = Math.random() * Math.PI * 2;
+                    const v = Math.random() * Math.PI * 2;
+                    const tubeR = 5;
+                    x = (r + tubeR * Math.cos(v)) * Math.cos(u);
+                    y = (r + tubeR * Math.cos(v)) * Math.sin(u);
+                    z = tubeR * Math.sin(v);
+                }
+                else if (shapeConfig.type === shapes.SPIRAL) { // DNA-like Double Helix
+                    const t = (i / particleCount) * Math.PI * 8; // 4 twists
+                    const arm = i % 2 === 0 ? 0 : Math.PI; // Two arms offset by 180 deg
+                    x = r * Math.cos(t + arm);
+                    y = (i / particleCount) * 40 - 20; // Spread vertically
+                    z = r * Math.sin(t + arm);
+                }
+                else if (shapeConfig.type === shapes.GALAXY) {
+                    const arms = 3;
+                    const armOffset = (i % arms) * (Math.PI * 2 / arms);
+                    const distFromCenter = Math.random();
+                    const angle = distFromCenter * Math.PI * 3 + armOffset; // Spiral twist
+                    const scatter = (Math.random() - 0.5) * (1.0 - distFromCenter) * 10; // More scatter in middle
+                    x = Math.cos(angle) * distFromCenter * r + scatter;
+                    y = (Math.random() - 0.5) * 3; // Flat disk
+                    z = Math.sin(angle) * distFromCenter * r + scatter;
+                }
+
                 data[idx] = x; data[idx + 1] = y; data[idx + 2] = z;
             }
             return data;
         }
 
+        // Initialize Geometry
         const initialPositions = generateShape(shapeConfigs[0]);
         baseGeometry.setAttribute('position', new THREE.BufferAttribute(initialPositions, 3));
         
@@ -182,6 +218,7 @@
         for(let i=0; i<baseColors.length; i+=3) { baseColors[i]=col.r; baseColors[i+1]=col.g; baseColors[i+2]=col.b; }
         baseGeometry.setAttribute('color', new THREE.BufferAttribute(baseColors, 3));
 
+        // Pre-allocate target buffers
         baseGeometry.setAttribute('position1', new THREE.BufferAttribute(new Float32Array(initialPositions), 3));
         baseGeometry.setAttribute('color1', new THREE.BufferAttribute(new Float32Array(baseColors), 3));
 
@@ -211,14 +248,17 @@
             const colAttr = baseGeometry.attributes.color;
             const targetColAttr = baseGeometry.attributes.color1;
 
+            // Current shape becomes the start point
             posAttr.array.set(targetPosAttr.array);
             posAttr.needsUpdate = true;
             colAttr.array.set(targetColAttr.array);
             colAttr.needsUpdate = true;
             
+            // Advance to next shape
             currentShapeIndex = (currentShapeIndex + 1) % shapeConfigs.length;
             const nextConfig = shapeConfigs[currentShapeIndex];
 
+            // Generate new target shape
             targetPosAttr.array.set(generateShape(nextConfig));
             targetPosAttr.needsUpdate = true;
 
@@ -255,7 +295,7 @@
             const statusEl = document.getElementById('status');
             
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                statusEl.innerText = "Tracking Active"; statusEl.style.color = "#ccff00";
+                statusEl.innerText = "Tracking Active"; statusEl.style.color = "#00ffaa";
                 
                 const landmarks = results.multiHandLandmarks[0];
                 
@@ -265,9 +305,10 @@
                 const wrist = landmarks[0], middle = landmarks[12];
                 const openDist = Math.hypot(wrist.x - middle.x, wrist.y - middle.y);
 
+                // SLOWER PINCH DETECTION: Increased cooldown to 80 frames to prevent accidental double-skipping
                 if (pinchDist < 0.06 && pinchCooldown <= 0) {
                     triggerMorph();
-                    pinchCooldown = 40; 
+                    pinchCooldown = 80; 
                 }
 
                 if (openDist > 0.4) {
@@ -280,7 +321,7 @@
                     targetScale = 1.0; 
                 }
             } else {
-                statusEl.innerText = "Hand Lost"; statusEl.style.color = "rgba(255,255,255,0.5)";
+                statusEl.innerText = "Hand Lost - Show Hand to Camera"; statusEl.style.color = "rgba(255,255,255,0.5)";
                 targetScale = 1.0; 
                 handColorTarget.set(0xffffff); 
             }
@@ -295,7 +336,7 @@
         
         cameraUtils.start().catch(()=>{
             document.getElementById('status').innerText = "Camera Denied. Must use HTTPS/Localhost.";
-            document.getElementById('status').style.color = "red";
+            document.getElementById('status').style.color = "#ff3300";
         });
 
         // --- 5. ANIMATION LOOP ---
@@ -307,7 +348,7 @@
             const elapsedTime = clock.getElapsedTime();
 
             material.uniforms.uTime.value = elapsedTime;
-            material.uniforms.uScale.value = THREE.MathUtils.lerp(material.uniforms.uScale.value, targetScale, 0.1);
+            material.uniforms.uScale.value = THREE.MathUtils.lerp(material.uniforms.uScale.value, targetScale, 0.08);
             
             handColorCurrent.lerp(handColorTarget, 0.05);
             material.uniforms.uGlobalColor.value = handColorCurrent;
@@ -317,6 +358,7 @@
                 let progress = morphTimeElapsed / morphDuration;
                 
                 progress = Math.min(1.0, progress);
+                // Smooth easing for organic movement
                 progress = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress; 
 
                 material.uniforms.uMorphProgress.value = progress;
@@ -324,8 +366,9 @@
                 if (progress >= 1.0) isMorphing = false;
             }
 
-            particles.rotation.y = elapsedTime * 0.05;
-            particles.rotation.x = elapsedTime * 0.02;
+            // Cinematic rotation
+            particles.rotation.y = elapsedTime * 0.06;
+            particles.rotation.x = elapsedTime * 0.03;
 
             composer.render();
         }
