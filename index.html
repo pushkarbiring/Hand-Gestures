@@ -43,20 +43,21 @@
         attribute vec3 color1;    
         
         varying vec3 vColor;
-        varying float vAlpha;
 
         void main() {
-            vColor = color;
+            // --- 1. GPU COLOR MORPHING ---
+            // Smoothly transition between the current shape's color and the next shape's color
+            vColor = mix(color, color1, uMorphProgress);
             
-            // --- 1. GPU MORPHING ---
+            // --- 2. GPU POSITION MORPHING ---
             vec3 morphedPos = mix(position, position1, uMorphProgress);
 
-            // --- 2. GPU PHYSICS: Drifting Noise ---
+            // --- 3. GPU PHYSICS: Drifting Noise ---
             morphedPos.x += sin(morphedPos.y * 0.1 + uTime * 0.5) * 0.6;
             morphedPos.y += cos(morphedPos.z * 0.1 + uTime * 0.5) * 0.6;
             morphedPos.z += sin(morphedPos.x * 0.1 + uTime * 0.5) * 0.6;
 
-            // --- 3. APPLY HAND GESTURE SCALE ---
+            // --- 4. APPLY HAND GESTURE SCALE ---
             morphedPos *= uScale;
 
             vec4 mvPosition = modelViewMatrix * vec4(morphedPos, 1.0);
@@ -189,6 +190,7 @@
             transparent: true,
             blending: THREE.AdditiveBlending, 
             depthWrite: false, 
+            vertexColors: true, // <--- THIS WAS THE MISSING MAGIC WORD!
             uniforms: {
                 uTime: { value: 0.0 },
                 uMorphProgress: { value: 1.0 },
