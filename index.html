@@ -211,16 +211,20 @@
         function triggerMorph() {
             if (isMorphing) return; // Prevent double trigger
             
-            // Update Base Geometry to current target before starting new morph
-            const posAttr = baseGeometry.attributes.position;
-            const targetPosArr = baseGeometry.attributes.position1.array;
-            posAttr.array.set(targetPosArr);
-            posAttr.needsUpdate = true;
+            // Only update if position1 exists (skips on the very first run)
+            if (baseGeometry.attributes.position1) {
+                const posAttr = baseGeometry.attributes.position;
+                const targetPosArr = baseGeometry.attributes.position1.array;
+                posAttr.array.set(targetPosArr);
+                posAttr.needsUpdate = true;
 
-            const colAttr = baseGeometry.attributes.color;
-            const targetColArr = baseGeometry.attributes.color1.array;
-            colAttr.array.set(targetColArr);
-            colAttr.needsUpdate = true;
+                const colAttr = baseGeometry.attributes.color;
+                const targetColArr = baseGeometry.attributes.color1.array;
+                colAttr.array.set(targetColArr);
+                colAttr.needsUpdate = true;
+            }
+            
+            // ... (rest of the function stays the same)
             
             // Advance shape index
             currentShapeIndex = (currentShapeIndex + 1) % shapeConfigs.length;
