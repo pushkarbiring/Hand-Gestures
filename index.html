@@ -46,23 +46,23 @@
 
         void main() {
             // --- 1. GPU COLOR MORPHING ---
-            // Smoothly transition between the current shape's color and the next shape's color
             vColor = mix(color, color1, uMorphProgress);
             
             // --- 2. GPU POSITION MORPHING ---
             vec3 morphedPos = mix(position, position1, uMorphProgress);
 
             // --- 3. GPU PHYSICS: Drifting Noise ---
-            morphedPos.x += sin(morphedPos.y * 0.1 + uTime * 0.5) * 0.6;
-            morphedPos.y += cos(morphedPos.z * 0.1 + uTime * 0.5) * 0.6;
-            morphedPos.z += sin(morphedPos.x * 0.1 + uTime * 0.5) * 0.6;
+            morphedPos.x += sin(morphedPos.y * 0.1 + uTime * 0.5) * 0.5;
+            morphedPos.y += cos(morphedPos.z * 0.1 + uTime * 0.5) * 0.5;
+            morphedPos.z += sin(morphedPos.x * 0.1 + uTime * 0.5) * 0.5;
 
             // --- 4. APPLY HAND GESTURE SCALE ---
             morphedPos *= uScale;
 
             vec4 mvPosition = modelViewMatrix * vec4(morphedPos, 1.0);
             
-            gl_PointSize = 12.0 * (40.0 / -mvPosition.z);
+            // FIX: Reduced particle size for crisp, professional look
+            gl_PointSize = 4.5 * (40.0 / -mvPosition.z);
             gl_Position = projectionMatrix * mvPosition;
         }
     </script>
@@ -72,13 +72,14 @@
         uniform vec3 uGlobalColor;
 
         void main() {
-            // --- 4. GLOWING CIRCULAR PARTICLES ---
+            // --- GLOWING CIRCULAR PARTICLES ---
             float dist = distance(gl_PointCoord, vec2(0.5));
             if (dist > 0.5) discard;
             
-            float alpha = smoothstep(0.5, 0.1, dist) * 0.9;
+            float alpha = smoothstep(0.5, 0.1, dist);
             
-            gl_FragColor = vec4(mix(vColor, uGlobalColor, 0.5), alpha);
+            // FIX: Multiply colors instead of mix, and reduce base alpha to prevent pure white-out
+            gl_FragColor = vec4(vColor * uGlobalColor, alpha * 0.5);
         }
     </script>
 
@@ -93,12 +94,15 @@
         const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
-        renderer.toneMapping = THREE.ReinhardToneMapping; 
+        // FIX: ACESFilmic makes neon lights look much more realistic and less blown-out
+        renderer.toneMapping = THREE.ACESFilmicToneMapping; 
+        renderer.toneMappingExposure = 1.2;
         document.body.appendChild(renderer.domElement);
 
         // --- 2. POST-PROCESSING (NEON GLOW) ---
         const renderScene = new THREE.RenderPass(scene, camera);
-        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.8, 0.3, 0.2);
+        // FIX: Lowered bloom strength and adjusted radius/threshold for a subtle, pro glow
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.5, 0.15);
         
         const composer = new THREE.EffectComposer(renderer);
         composer.addPass(renderScene);
@@ -170,7 +174,6 @@
             return data;
         }
 
-        // --- THE FIX: INITIALIZE & PRE-ALLOCATE ALL GEOMETRY ATTRIBUTES ---
         const initialPositions = generateShape(shapeConfigs[0]);
         baseGeometry.setAttribute('position', new THREE.BufferAttribute(initialPositions, 3));
         
@@ -179,18 +182,16 @@
         for(let i=0; i<baseColors.length; i+=3) { baseColors[i]=col.r; baseColors[i+1]=col.g; baseColors[i+2]=col.b; }
         baseGeometry.setAttribute('color', new THREE.BufferAttribute(baseColors, 3));
 
-        // CRITICAL FIX: Pre-allocate target arrays immediately so the shader never crashes
         baseGeometry.setAttribute('position1', new THREE.BufferAttribute(new Float32Array(initialPositions), 3));
         baseGeometry.setAttribute('color1', new THREE.BufferAttribute(new Float32Array(baseColors), 3));
 
-        // Create Custom Shader Material
         const material = new THREE.ShaderMaterial({
             vertexShader: document.getElementById('vertexShader').textContent,
             fragmentShader: document.getElementById('fragmentShader').textContent,
             transparent: true,
             blending: THREE.AdditiveBlending, 
             depthWrite: false, 
-            vertexColors: true, // <--- THIS WAS THE MISSING MAGIC WORD!
+            vertexColors: true, 
             uniforms: {
                 uTime: { value: 0.0 },
                 uMorphProgress: { value: 1.0 },
@@ -202,7 +203,6 @@
         const particles = new THREE.Points(baseGeometry, material);
         scene.add(particles);
 
-        // --- SAFE MORPH FUNCTION ---
         function triggerMorph() {
             if (isMorphing) return; 
             
@@ -211,17 +211,14 @@
             const colAttr = baseGeometry.attributes.color;
             const targetColAttr = baseGeometry.attributes.color1;
 
-            // 1. Shift current target shape to become the new base shape
             posAttr.array.set(targetPosAttr.array);
             posAttr.needsUpdate = true;
             colAttr.array.set(targetColAttr.array);
             colAttr.needsUpdate = true;
             
-            // 2. Advance shape index
             currentShapeIndex = (currentShapeIndex + 1) % shapeConfigs.length;
             const nextConfig = shapeConfigs[currentShapeIndex];
 
-            // 3. Update the target arrays with the newly generated shape data
             targetPosAttr.array.set(generateShape(nextConfig));
             targetPosAttr.needsUpdate = true;
 
@@ -233,7 +230,6 @@
             }
             targetColAttr.needsUpdate = true;
 
-            // Start morph
             isMorphing = true;
             morphStartTime = performance.now();
             material.uniforms.uMorphProgress.value = 0.0;
